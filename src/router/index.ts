@@ -3,22 +3,29 @@ import type { RouteRecordRaw } from 'vue-router'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { setupPageGuard } from './permission'
 import { ChatLayout } from '@/views/chat/layout'
-
+import HomeVue from '@/views/home/index.vue'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'Root',
+    redirect: '/home',
+  },
+  {
+    path: '/home',
+    name: 'Home',
+    component: HomeVue, // 绑定 Home 组件
+  },
+  {
+    path: '/chat',
     component: ChatLayout,
-    redirect: '/chat',
     children: [
       {
-        path: '/chat/:uuid?',
+        path: '/chat',
         name: 'Chat',
         component: () => import('@/views/chat/index.vue'),
       },
     ],
   },
-
   {
     path: '/404',
     name: '404',

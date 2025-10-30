@@ -104,7 +104,10 @@ async function onConversation() {
   scrollToBottom()
 
   try {
-    let lastText = ''
+    // 外部状态管理：记录未完成的临时数据和已处理的位置
+    let tempData = ''; // 暂存未完成的数据块（可能跨多次回调）
+    let lastProcessedIndex = 0; // 记录上次处理到的响应文本位置
+    let lastText = '';
     const fetchChatAPIOnce = async () => {
       await fetchChatAPIProcess<Chat.ConversationResponse>({
         prompt: message,
@@ -113,19 +116,59 @@ async function onConversation() {
         onDownloadProgress: ({ event }) => {
           const xhr = event.target
           const { responseText } = xhr
-          // Always process the final line
-          const lastIndex = responseText.lastIndexOf('\n', responseText.length - 2)
-          let chunk = responseText
-          if (lastIndex !== -1)
-            chunk = responseText.substring(lastIndex)
+
+        // 1. 只处理新增的内容（避免重复解析历史数据）
+        const newContent = responseText.slice(lastProcessedIndex);
+        lastProcessedIndex = responseText.length;
+        console.log('newContent data:', newContent);
+        // 2. 拼接临时数据（处理跨回调的不完整数据块）
+        tempData += newContent;
+        // 3. 基于 "data:" 前缀分割可能的完整数据块
+        // 正则匹配：全局查找 "data: " 开头的片段（非贪婪匹配到下一个 "data: " 或结尾）
+        const dataBlockRegex = /data: (.*?)(?=\ndata: |$)/gs;
+        const matches = [];
+        let match;
+
+        // 4. 提取所有可能的完整数据块
+        while ((match = dataBlockRegex.exec(tempData)) !== null) {
+          matches.push(match[1].trim()); // match[1] 是 "data: " 后面的内容
+          // 5. 判断是否有未完成的尾部数据（最后一个数据块可能不完整）
+          if (matches.length > 0) {
+            // 计算最后一个完整数据块的结束位置，更新 tempData 为未完成的尾部
+            const lastMatchEnd = dataBlockRegex.lastIndex;
+            tempData = tempData.slice(lastMatchEnd);
+          }
+        }
+        // 6. 处理所有提取到的完整数据块
+        matches.forEach(rawData => {
+          console.log('rawData data:', rawData);
+          // 过滤空数据或结束标识
+          if (rawData === '' || rawData === '[DONE]') {
+            if (rawData === '[DONE]') {
+              console.log('流结束');
+              // 处理结束逻辑（如关闭 loading）
+              updateChatSome(+uuid, dataSources.value.length - 1, { loading: false });
+            }
+            return;
+          }
+
           try {
-            const data = JSON.parse(chunk)
+            // chunk = chunk.replace(/^data: /, '').trim()
+            // console.log('chunk :', chunk);
+            // if (!chunk || chunk === '[DONE]') {
+            //   if (chunk === '[DONE]') {
+            //     updateChatSome(+uuid, dataSources.value.length - 1, { loading: false });
+            //   }
+            //   return;
+            // }
+            const data = JSON.parse(rawData)
+           
             updateChat(
               +uuid,
               dataSources.value.length - 1,
               {
                 dateTime: new Date().toLocaleString(),
-                text: lastText + (data.text ?? ''),
+                text: lastText + (data.choices[0].delta.content ?? ''),
                 inversion: false,
                 error: false,
                 loading: true,
@@ -133,7 +176,7 @@ async function onConversation() {
                 requestOptions: { prompt: message, options: { ...options } },
               },
             )
-
+            lastText += data.choices[0].delta.content ?? ''
             if (openLongReply && data.detail.choices[0].finish_reason === 'length') {
               options.parentMessageId = data.id
               lastText = data.text
@@ -144,10 +187,14 @@ async function onConversation() {
             scrollToBottomIfAtBottom()
           }
           catch (error) {
+            console.log('error:', error);
             //
           }
+        });  
         },
       })
+
+
       updateChatSome(+uuid, dataSources.value.length - 1, { loading: false })
     }
 
